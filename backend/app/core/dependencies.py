@@ -1,15 +1,14 @@
 from enum import Enum
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
 from app.db.redis import get_redis
 from app.db.session import get_db
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
+oauth2_scheme = HTTPBearer()
 
 class Role(str, Enum):
     PROCUREMENT_MANAGER = "procurement_manager"
@@ -25,9 +24,11 @@ class CurrentUser:
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> CurrentUser:
+    token = credentials.credentials
+
     payload = decode_access_token(token)
     if payload is None:
         raise HTTPException(
