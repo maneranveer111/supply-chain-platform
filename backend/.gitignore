@@ -4,3 +4,4 @@ venv/
 .env
 saved_models/*.keras
 saved_models/*.pkl
+celerybeat-schedule*
