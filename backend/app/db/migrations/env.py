@@ -15,6 +15,8 @@ from app.models import (  # noqa: F401
     inventory,
     purchase_order,
     store,
+    store_sale,
+    store_scaler,
     user,
 )
 

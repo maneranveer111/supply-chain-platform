@@ -4,6 +4,8 @@ from app.models.forecast import Forecast
 from app.models.inventory import Inventory
 from app.models.purchase_order import PurchaseOrder
 from app.models.store import Store
+from app.models.store_sale import StoreSale
+from app.models.store_scaler import StoreScaler
 from app.models.user import User
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "Inventory",
     "PurchaseOrder",
     "Store",
+    "StoreSale",
+    "StoreScaler",
     "User",
 ]

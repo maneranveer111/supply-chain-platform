@@ -16,6 +16,15 @@ async def get_recommendations(
     db: Session = Depends(get_db),
     user=Depends(require_role(Role.PROCUREMENT_MANAGER, Role.ADMIN)),
 ):
+    from app.core.authorization import verify_store_access
+    from app.models.store import Store
+
+    if store_id is not None:
+        store = db.query(Store).filter(Store.id == store_id).first()
+        if not store:
+            raise HTTPException(404, "Store not found")
+        verify_store_access(store, user)
+
     return await po_engine.get_recommendations(store_id, db)
 
 

@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column, Date, Integer
+from sqlalchemy import JSON, Column, Date, Integer, UniqueConstraint
 
 from app.db.session import Base
 
@@ -17,6 +17,9 @@ class DailyStoreFeature(Base):
     """
 
     __tablename__ = "daily_store_features"
+    __table_args__ = (
+        UniqueConstraint("store_id", "date", name="uq_daily_store_features_store_id_date"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     store_id = Column(Integer, index=True, nullable=False)
