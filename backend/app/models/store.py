@@ -38,6 +38,10 @@ class Store(Base):
     # "cluster_average"   →  force cluster-average cold-start path
     forecast_mode = Column(String, nullable=False, server_default="auto")
 
+    # --- Phase 5: Store onboarding / background processing status ---
+    # "pending", "processing", "ready", "failed"
+    onboarding_status = Column(String, nullable=True, server_default="ready")
+
     # --- SQLAlchemy relationships ---
     owner = relationship("User", back_populates="stores")
 

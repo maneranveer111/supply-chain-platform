@@ -35,3 +35,4 @@ class ForecastStatusResponse(BaseModel):
     history_days: int
     has_cluster: bool
     status: str
+    onboarding_status: str | None = None

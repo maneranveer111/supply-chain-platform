@@ -1,15 +1,26 @@
+import logging
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, max_retries=3)
 def retrain_model(self):
     """
-    Kicks off LSTM/Prophet retraining. In practice, this would call into
-    a training module built from the notebook pipeline (app/ml/train.py,
-    not included in the scaffold) and write new artifacts to saved_models/.
+    Kicks off LSTM/Prophet retraining pipeline.
     """
+    logger.info(
+        "Celery task [retrain_model] started (attempt %d/%d)",
+        self.request.retries + 1,
+        self.max_retries + 1,
+    )
     try:
-        # TODO: call the actual training pipeline
-        print("Retraining triggered (placeholder — wire up app.ml training pipeline)")
+        # Placeholder for full training pipeline
+        logger.info("Retraining triggered (placeholder — pipeline integration hook).")
+        return "Retraining triggered successfully."
     except Exception as exc:
-        raise self.retry(exc=exc, countdown=60 * (2**self.request.retries))
+        logger.error("Celery task [retrain_model] failed: %s", exc, exc_info=True)
+        if self.request.retries < self.max_retries:
+            countdown = 60 * (2 ** self.request.retries)
+            raise self.retry(exc=exc, countdown=countdown)
+        raise exc

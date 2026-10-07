@@ -11,6 +11,7 @@ celery_app = Celery(
         "app.workers.retrain_tasks",
         "app.workers.cluster_tasks",
         "app.workers.summary_tasks",
+        "app.workers.onboarding_tasks",
     ],
 )
 

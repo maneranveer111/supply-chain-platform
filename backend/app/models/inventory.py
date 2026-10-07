@@ -1,3 +1,4 @@
+from datetime import datetime
 from sqlalchemy import Column, DateTime, Float, Integer
 
 from app.db.session import Base
@@ -15,4 +16,4 @@ class Inventory(Base):
     id = Column(Integer, primary_key=True, index=True)
     store_id = Column(Integer, index=True, unique=True, nullable=False)
     current_quantity = Column(Float, nullable=False, default=0.0)
-    updated_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)

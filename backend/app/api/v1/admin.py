@@ -57,13 +57,9 @@ async def map_benchmark_store(
     store.benchmark_store_id = payload.benchmark_store_id
     db.commit()
     
-    # Invalidate forecast cache
-    from app.db.redis import get_redis
-    from app.services.forecast_service import CACHE_KEY_VERSION
-    from app.core.config import settings
-    redis = await get_redis()
-    cache_key = f"forecast:{CACHE_KEY_VERSION}:{store_id}:{settings.forecast_horizon}"
-    await redis.delete(cache_key)
+    # Invalidate forecast cache for all horizons of this store
+    from app.services.forecast_service import invalidate_forecast_cache
+    await invalidate_forecast_cache(store_id)
 
     return {"status": "success", "store_id": store_id, "benchmark_store_id": payload.benchmark_store_id}
 

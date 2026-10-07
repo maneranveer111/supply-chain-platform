@@ -2,15 +2,22 @@
 Forecast Service: coordinates caching, routing, and the API layer.
 
 Responsibilities:
-  - Redis cache layer (versioned key to invalidate Phase 1 cache entries).
+  - Versioned Redis cache layer with safe degradation on cache failure.
+  - Granular cache invalidation per store or globally.
   - Delegates all routing decisions to app.ml.forecast_router.
   - Converts ForecastResult → serializable dict.
   - Does NOT contain any scaler-lookup or ML-inference logic.
 
-Cache key version:
-  "v2" is appended to all keys in Phase 2 so that any old cache entries
-  (which lack forecast_method / forecast_confidence) are automatically
-  bypassed.  Old keys will expire on their original TTL without intervention.
+Cache key strategy:
+  Key format: forecast:{CACHE_KEY_VERSION}:{store_id}:{horizon}
+  Example:    forecast:v2:1:7
+
+  - Versioned namespace prevents stale formats from colliding across deployments.
+  - store_id segment prevents cross-store or cross-user data leakage.
+  - horizon segment isolates forecasts of different lengths (e.g. 7 vs 14 vs 30 days).
+  - Invalidation uses pattern matching:
+      forecast:v2:{store_id}:*  -> sweeps all horizons for the specified store.
+      forecast:v2:*             -> sweeps all stores when clusters or models refresh.
 """
 
 import json
@@ -26,32 +33,103 @@ from app.ml.inference import ModelNotLoadedError
 
 logger = logging.getLogger(__name__)
 
-# Cache key version — increment whenever response schema changes to prevent
-# stale cache entries with missing fields from being served.
 CACHE_KEY_VERSION = "v2"
 CACHE_TTL_SECONDS = 60 * 60 * 6  # 6 hours
 
 
 async def get_forecast(store_id: int, horizon: int, db: Session) -> dict:
     """
-    Public entry point.  Checks the Redis cache first; on miss, calls
-    _generate_forecast() and stores the result.
-
-    The cache key is versioned so that Phase 1 cache entries (which do
-    not contain forecast_method / forecast_confidence) are bypassed.
+    Public entry point. Checks the Redis cache first; on miss or Redis failure,
+    computes the forecast directly. If Redis is unavailable, inference continues
+    safely without crashing.
     """
-    redis = await get_redis()
     cache_key = f"forecast:{CACHE_KEY_VERSION}:{store_id}:{horizon}"
+    redis = None
 
-    cached = await redis.get(cache_key)
-    if cached:
-        logger.debug("Cache HIT: %s", cache_key)
-        return json.loads(cached)
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            logger.info("Forecast cache HIT: store_id=%d, key=%s", store_id, cache_key)
+            return json.loads(cached)
+        logger.info("Forecast cache MISS: store_id=%d, key=%s", store_id, cache_key)
+    except Exception as exc:
+        logger.warning(
+            "Redis cache unavailable for store_id=%d (%s). Falling back to direct forecast.",
+            store_id,
+            exc,
+        )
+        redis = None
 
-    logger.debug("Cache MISS: %s", cache_key)
     forecast = await _generate_forecast(store_id, horizon, db)
-    await redis.setex(cache_key, CACHE_TTL_SECONDS, json.dumps(forecast))
+
+    if redis is not None:
+        try:
+            await redis.setex(cache_key, CACHE_TTL_SECONDS, json.dumps(forecast))
+            logger.debug("Forecast cached: key=%s, ttl=%ds", cache_key, CACHE_TTL_SECONDS)
+        except Exception as exc:
+            logger.warning(
+                "Failed to write forecast to Redis for store_id=%d: %s",
+                store_id,
+                exc,
+            )
+
     return forecast
+
+
+async def invalidate_forecast_cache(store_id: int | None = None) -> int:
+    """
+    Asynchronously invalidates forecast cache keys.
+    - If store_id is given: deletes all horizons for this store (`forecast:v2:{store_id}:*`).
+    - If store_id is None: deletes all forecast cache keys (`forecast:v2:*`).
+    Returns the count of deleted keys.
+    Gracefully handles Redis downtime.
+    """
+    pattern = (
+        f"forecast:{CACHE_KEY_VERSION}:{store_id}:*"
+        if store_id is not None
+        else f"forecast:{CACHE_KEY_VERSION}:*"
+    )
+    try:
+        redis = await get_redis()
+        keys = await redis.keys(pattern)
+        if keys:
+            count = await redis.delete(*keys)
+            logger.info("Invalidated %d cache keys matching '%s'", count, pattern)
+            return count
+        logger.debug("No keys found to invalidate for pattern '%s'", pattern)
+        return 0
+    except Exception as exc:
+        logger.warning(
+            "Redis error during cache invalidation (pattern=%s): %s", pattern, exc
+        )
+        return 0
+
+
+def invalidate_forecast_cache_sync(store_id: int | None = None) -> int:
+    """
+    Synchronous cache invalidator for Celery tasks or non-async contexts.
+    """
+    import redis as sync_redis
+
+    pattern = (
+        f"forecast:{CACHE_KEY_VERSION}:{store_id}:*"
+        if store_id is not None
+        else f"forecast:{CACHE_KEY_VERSION}:*"
+    )
+    try:
+        r = sync_redis.from_url(settings.redis_url)
+        keys = r.keys(pattern)
+        if keys:
+            count = r.delete(*keys)
+            logger.info("Sync invalidated %d cache keys matching '%s'", count, pattern)
+            return count
+        return 0
+    except Exception as exc:
+        logger.warning(
+            "Sync Redis error during cache invalidation (pattern=%s): %s", pattern, exc
+        )
+        return 0
 
 
 async def _generate_forecast(store_id: int, horizon: int, db: Session) -> dict:
