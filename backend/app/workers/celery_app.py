@@ -12,6 +12,7 @@ celery_app = Celery(
         "app.workers.cluster_tasks",
         "app.workers.summary_tasks",
         "app.workers.onboarding_tasks",
+        "app.workers.notification_tasks",
     ],
 )
 
@@ -23,6 +24,14 @@ celery_app.conf.beat_schedule = {
     "refresh-clusters-weekly": {
         "task": "app.workers.cluster_tasks.refresh_clusters",
         "schedule": crontab(hour=5, minute=0, day_of_week="sunday"),
+    },
+    "check-low-stock-alerts-daily": {
+        "task": "app.workers.notification_tasks.check_low_stock_alerts",
+        "schedule": crontab(hour=7, minute=0),
+    },
+    "subscription-reminders-daily": {
+        "task": "app.workers.notification_tasks.send_subscription_reminders",
+        "schedule": crontab(hour=8, minute=0),
     },
 }
 celery_app.conf.timezone = "UTC"

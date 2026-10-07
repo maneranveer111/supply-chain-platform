@@ -19,10 +19,16 @@ class Settings(BaseSettings):
     forecast_window: int = 30
     forecast_horizon: int = 7
 
-    # NL summary provider: "gemini", "groq", or "" (disabled -> plain-text fallback)
-    llm_provider: str = ""
+    # NL / LLM provider: "gemini", "groq", or "" (disabled -> plain-text fallback)
+    llm_provider: str = "gemini"
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
     groq_api_key: str = ""
+
+    # Brevo transactional email configuration
+    brevo_api_key: str = ""
+    brevo_sender_email: str = ""
+    brevo_sender_name: str = "Supply Chain Platform"
 
     model_config = SettingsConfigDict(
         env_file=".env",

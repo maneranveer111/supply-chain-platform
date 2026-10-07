@@ -24,15 +24,22 @@ async def generate_weekly_summary(stats: dict) -> str:
     }
     """
     prompt = _build_prompt(stats)
+    fallback = _fallback_summary(stats)
 
     provider = settings.llm_provider.lower().strip()
 
     if provider == "gemini" and settings.gemini_api_key:
-        return await _call_gemini(prompt)
+        try:
+            return await _call_gemini(prompt)
+        except Exception:
+            return fallback
     if provider == "groq" and settings.groq_api_key:
-        return await _call_groq(prompt)
+        try:
+            return await _call_groq(prompt)
+        except Exception:
+            return fallback
 
-    return _fallback_summary(stats)
+    return fallback
 
 
 def _build_prompt(stats: dict) -> str:
@@ -50,14 +57,12 @@ def _build_prompt(stats: dict) -> str:
 
 async def _call_gemini(prompt: str) -> str:
     """
-    Uses Google's Gemini API (free tier at aistudio.google.com).
-    Model: gemini-1.5-flash -- fast and free-tier friendly for this
-    kind of short structured-text generation.
+    Uses Google's Gemini API configured via settings.gemini_model.
     """
     import google.generativeai as genai
 
     genai.configure(api_key=settings.gemini_api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel(settings.gemini_model)
     response = model.generate_content(prompt)
     return response.text
 

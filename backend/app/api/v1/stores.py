@@ -269,3 +269,100 @@ async def trigger_store_processing(
             "store_id": store_id,
             "result": result,
         }
+
+
+@router.get("/{store_id}/insights")
+async def get_store_insights(
+    store_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Generate holistic AI-powered store intelligence and recommendations
+    combining forecast trends, inventory levels, and operational metrics.
+    """
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    verify_store_access(store, user)
+
+    from app.services import inventory_service
+    from app.services.llm_service import safe_generate_insight
+
+    inv_signals = await inventory_service.analyze_inventory_signals(store_id=store_id, db=db)
+
+    prompt = (
+        f"You are an expert retail supply chain advisor. Provide a concise, 3-paragraph executive operational review "
+        f"for Store #{store_id} ('{store.name or 'Main Store'}'). Use these exact data points:\n"
+        f"- Store Type: {store.store_type}, Assortment: {store.assortment}\n"
+        f"- On-hand Inventory: {inv_signals['current_quantity']} units\n"
+        f"- Projected Days of Supply: {inv_signals['days_of_supply']} days\n"
+        f"- Stock Health Status: {inv_signals['status']}\n"
+        f"- 7-Day Forecast Daily Demand Mean: {inv_signals['daily_demand_mean']} units/day\n"
+        f"- Reorder Point: {inv_signals['reorder_point']} units\n"
+        f"- Recommended Reorder Quantity: {inv_signals['recommended_reorder_qty']} units\n"
+        f"- Forecast Engine: {inv_signals['forecast_method']}\n\n"
+        f"Synthesize the demand trajectory, stockout risks, and concrete procurement action items."
+    )
+    fallback = (
+        f"Store #{store_id} operates with {inv_signals['current_quantity']} units in stock, "
+        f"representing {inv_signals['days_of_supply']} days of supply under {inv_signals['status']} status. "
+        f"Estimated daily demand is {inv_signals['daily_demand_mean']} units. "
+        f"Recommended reorder volume is {inv_signals['recommended_reorder_qty']} units."
+    )
+    insight = await safe_generate_insight(prompt, fallback)
+
+    return {
+        "store_id": store_id,
+        "store_name": store.name,
+        "signals": inv_signals,
+        "insights": insight,
+    }
+
+
+@router.get("/{store_id}/inventory")
+def get_store_inventory_endpoint(
+    store_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    verify_store_access(store, user)
+    from app.services.inventory_service import get_or_create_inventory
+    return get_or_create_inventory(store_id, db)
+
+
+@router.put("/{store_id}/inventory")
+def update_store_inventory_endpoint(
+    store_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    verify_store_access(store, user)
+    from app.services.inventory_service import update_inventory_level
+    qty = payload.get("current_quantity")
+    if qty is None:
+        raise HTTPException(status_code=422, detail="current_quantity is required")
+    return update_inventory_level(store_id, float(qty), db)
+
+
+@router.get("/{store_id}/inventory/signals")
+async def get_store_inventory_signals_endpoint(
+    store_id: int,
+    include_explanation: bool = Query(False),
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    store = db.query(Store).filter(Store.id == store_id).first()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    verify_store_access(store, user)
+    from app.services.inventory_service import analyze_inventory_signals
+    return await analyze_inventory_signals(store_id, db, include_llm_explanation=include_explanation)
+

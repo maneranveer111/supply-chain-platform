@@ -63,4 +63,67 @@ async def approve_order(
     db.commit()
     db.refresh(order)
 
+    # Optional notification hook
+    try:
+        store = db.query(Store).filter(Store.id == order.store_id).first()
+        if store and store.user_id:
+            from app.models.user import User
+            from app.services.email_service import send_po_approval_notification
+            owner = db.query(User).filter(User.id == store.user_id).first()
+            if owner and owner.email:
+                await send_po_approval_notification(
+                    to_email=owner.email,
+                    po_id=order.id,
+                    store_id=order.store_id,
+                    status=order.status,
+                    recommended_qty=order.recommended_qty,
+                )
+    except Exception:
+        pass
+
     return {"po_id": order.id, "status": order.status}
+
+
+@router.post("/{po_id}/explain")
+async def explain_order(
+    po_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_role(Role.PROCUREMENT_MANAGER, Role.ADMIN, Role.STORE_ANALYST)),
+):
+    """
+    Generate an explainable AI business reasoning breakdown for a purchase order.
+    """
+    from app.services.llm_service import explain_purchase_order
+
+    order = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if order is None:
+        raise HTTPException(404, f"Purchase order {po_id} not found")
+
+    store = db.query(Store).filter(Store.id == order.store_id).first()
+    if store:
+        verify_store_access(store, user)
+
+    safety_stock = (
+        round(max(0.0, order.forecasted_demand * 0.15), 2)
+        if order.forecasted_demand > 0
+        else 0.0
+    )
+
+    explanation = await explain_purchase_order(
+        store_id=order.store_id,
+        recommended_qty=order.recommended_qty,
+        forecasted_demand=order.forecasted_demand,
+        current_inventory=order.current_inventory,
+        safety_stock=safety_stock,
+    )
+
+    return {
+        "po_id": order.id,
+        "store_id": order.store_id,
+        "recommended_qty": order.recommended_qty,
+        "forecasted_demand": order.forecasted_demand,
+        "current_inventory": order.current_inventory,
+        "safety_stock": safety_stock,
+        "status": order.status,
+        "explanation": explanation,
+    }
