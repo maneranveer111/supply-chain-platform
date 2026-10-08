@@ -21,5 +21,5 @@ class StoreResponse(BaseModel):
     forecast_mode: str
 
     class Config:
-        orm_mode = True
         from_attributes = True
+

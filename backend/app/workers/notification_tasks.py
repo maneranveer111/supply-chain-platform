@@ -28,8 +28,10 @@ def check_low_stock_alerts(self):
 
     try:
         # Optional Redis client for task retry idempotency
-        task_req_id = getattr(self.request, "id", None) or "run"
+        task_req_id = getattr(self.request, "id", None) or getattr(self, "current_task_id", None)
         r = None
+
+
 
         try:
             import redis
@@ -86,7 +88,9 @@ def check_low_stock_alerts(self):
         logger.error("Error running low stock check: %s", exc, exc_info=True)
         db.rollback()
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=60)
+            countdown = 60 * (2 ** self.request.retries)
+            raise self.retry(exc=exc, countdown=countdown)
+
         raise exc
     finally:
         db.close()
@@ -122,7 +126,9 @@ def send_subscription_reminders(self):
     except Exception as exc:
         logger.error("Error in subscription reminders: %s", exc, exc_info=True)
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=60)
+            countdown = 60 * (2 ** self.request.retries)
+            raise self.retry(exc=exc, countdown=countdown)
+
         raise exc
     finally:
         db.close()

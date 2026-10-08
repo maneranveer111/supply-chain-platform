@@ -300,17 +300,23 @@ def test_check_low_stock_alerts_deduplicates_on_retry(db_session):
     # First time key does not exist; after set, key exists
     mock_redis.exists.return_value = False
 
-    with patch("app.workers.notification_tasks.SessionLocal", return_value=db_session):
-        with patch("app.workers.notification_tasks.analyze_inventory_signals", AsyncMock(return_value=mock_signals)):
-            with patch("app.workers.notification_tasks.send_email_sync", return_value={"status": "sent"}) as mock_email:
-                with patch("redis.Redis.from_url", return_value=mock_redis):
-                    # Run 1
-                    res1 = check_low_stock_alerts()
-                    assert res1["alerts_sent"] == 1
-                    assert mock_email.call_count == 1
+    try:
+        check_low_stock_alerts.current_task_id = "retry-task-uuid-456"
+        with patch("app.workers.notification_tasks.SessionLocal", return_value=db_session):
+            with patch("app.workers.notification_tasks.analyze_inventory_signals", AsyncMock(return_value=mock_signals)):
+                with patch("app.workers.notification_tasks.send_email_sync", return_value={"status": "sent"}) as mock_email:
+                    with patch("redis.Redis.from_url", return_value=mock_redis):
+                        # Run 1
+                        res1 = check_low_stock_alerts()
+                        assert res1["alerts_sent"] == 1
+                        assert mock_email.call_count == 1
 
-                    # Run 2 (Simulate retry where redis now returns True for key existence)
-                    mock_redis.exists.return_value = True
-                    res2 = check_low_stock_alerts()
-                    assert res2["alerts_sent"] == 0
-                    assert mock_email.call_count == 1  # Not called again
+                        # Run 2 (Simulate retry where redis now returns True for key existence)
+                        mock_redis.exists.return_value = True
+                        res2 = check_low_stock_alerts()
+                        assert res2["alerts_sent"] == 0
+                        assert mock_email.call_count == 1  # Not called again
+    finally:
+        check_low_stock_alerts.current_task_id = None
+
+
