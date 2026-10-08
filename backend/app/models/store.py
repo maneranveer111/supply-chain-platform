@@ -40,7 +40,8 @@ class Store(Base):
 
     # --- Phase 5: Store onboarding / background processing status ---
     # "pending", "processing", "ready", "failed"
-    onboarding_status = Column(String, nullable=True, server_default="ready")
+    onboarding_status = Column(String, nullable=True, server_default="ready", index=True)
+
 
     # --- SQLAlchemy relationships ---
     owner = relationship("User", back_populates="stores")

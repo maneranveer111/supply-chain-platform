@@ -11,5 +11,6 @@ class PurchaseOrder(Base):
     recommended_qty = Column(Float, nullable=False)
     current_inventory = Column(Float, nullable=False)
     forecasted_demand = Column(Float, nullable=False)
-    status = Column(String, default="pending")  # pending, approved, rejected
+    status = Column(String, default="pending", index=True)  # pending, approved, rejected
+
     created_at = Column(DateTime, nullable=False)

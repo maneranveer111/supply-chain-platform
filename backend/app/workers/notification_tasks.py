@@ -27,9 +27,29 @@ def check_low_stock_alerts(self):
     checked_stores = 0
 
     try:
+        # Optional Redis client for task retry idempotency
+        task_req_id = getattr(self.request, "id", None) or "run"
+        r = None
+
+        try:
+            import redis
+            from app.core.config import settings
+            r = redis.Redis.from_url(settings.redis_url, socket_timeout=1.0)
+        except Exception:
+            pass
+
         stores = db.query(Store).all()
         for store in stores:
             checked_stores += 1
+            # Check if this store was already notified in this specific task run (prevents duplicate on retry)
+            if r and task_req_id:
+                try:
+                    if r.exists(f"alert_dedup:{task_req_id}:{store.id}"):
+                        logger.info("Skipping store_id=%d, already notified in task %s", store.id, task_req_id)
+                        continue
+                except Exception:
+                    pass
+
             # Run inventory analysis
             signals = asyncio.run(analyze_inventory_signals(store.id, db, include_llm_explanation=False))
             status = signals.get("status")
@@ -50,6 +70,13 @@ def check_low_stock_alerts(self):
                     res = send_email_sync(to_email=recipient, subject=subject, html_content=html)
                     logger.info("Dispatched low stock email to %s for store_id=%d: %s", recipient, store.id, res.get("status"))
                     alerts_sent += 1
+
+                    if r and task_req_id:
+                        try:
+                            r.set(f"alert_dedup:{task_req_id}:{store.id}", "1", ex=86400)
+                        except Exception:
+                            pass
+
 
         db.commit()
         logger.info("Completed low stock scan: %d stores checked, %d alerts sent.", checked_stores, alerts_sent)

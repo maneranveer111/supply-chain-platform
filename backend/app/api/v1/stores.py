@@ -129,9 +129,21 @@ async def upload_sales(
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
 
-    contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Limit is 10MB.")
+    # Enforce 10MB size limit via chunked reading to prevent memory exhaustion DoS
+    MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+    chunk_size = 64 * 1024
+    content_chunks = []
+    total_size = 0
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=400, detail="File too large. Limit is 10MB.")
+        content_chunks.append(chunk)
+    contents = b"".join(content_chunks)
+
 
     store = db.query(Store).filter(Store.id == store_id).first()
     if not store:
@@ -211,7 +223,8 @@ async def upload_sales(
     except Exception as e:
         db.rollback()
         logger.error("Database error saving sales for store_id=%d: %s", store_id, e)
-        raise HTTPException(status_code=500, detail=f"Database error during upload: {str(e)}")
+        raise HTTPException(status_code=500, detail="Database error occurred during sales data upload.")
+
 
     # Process features: either synchronous or via Celery background worker
     if background:
@@ -349,7 +362,14 @@ def update_store_inventory_endpoint(
     qty = payload.get("current_quantity")
     if qty is None:
         raise HTTPException(status_code=422, detail="current_quantity is required")
-    return update_inventory_level(store_id, float(qty), db)
+    try:
+        float_qty = float(qty)
+        if float_qty < 0:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="current_quantity must be a valid non-negative number")
+    return update_inventory_level(store_id, float_qty, db)
+
 
 
 @router.get("/{store_id}/inventory/signals")

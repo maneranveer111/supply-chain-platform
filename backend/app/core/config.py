@@ -30,12 +30,41 @@ class Settings(BaseSettings):
     brevo_sender_email: str = ""
     brevo_sender_name: str = "Supply Chain Platform"
 
+    # CORS: comma-separated list of allowed origins for production.
+    # In development (environment=="development"), a permissive wildcard is used.
+    # Example: CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
+    cors_allowed_origins: str = ""
+
+    # Logging level: DEBUG | INFO | WARNING | ERROR
+    log_level: str = "INFO"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
         protected_namespaces=("settings_",),
     )
+
+    def get_cors_origins(self) -> list[str]:
+        """
+        Returns the list of allowed CORS origins.
+        - Development: permissive (localhost variants).
+        - Production: only explicitly configured origins.
+        """
+        if self.cors_allowed_origins:
+            return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
+        if self.environment == "development":
+            return [
+                "http://localhost",
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://localhost:8000",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:8000",
+            ]
+        # Production with no origins configured: deny all cross-origin requests.
+        return []
 
 
 settings = Settings()

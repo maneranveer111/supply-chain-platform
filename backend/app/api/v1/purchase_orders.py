@@ -50,7 +50,7 @@ async def approve_order(
     po_id: int,
     payload: PurchaseOrderApproval,
     db: Session = Depends(get_db),
-    user=Depends(require_role(Role.PROCUREMENT_MANAGER)),
+    user=Depends(require_role(Role.PROCUREMENT_MANAGER, Role.ADMIN)),
 ):
     if payload.status not in ("approved", "rejected"):
         raise HTTPException(400, "status must be 'approved' or 'rejected'")
@@ -59,13 +59,17 @@ async def approve_order(
     if order is None:
         raise HTTPException(404, f"Purchase order {po_id} not found")
 
+    store = db.query(Store).filter(Store.id == order.store_id).first()
+    if not store:
+        raise HTTPException(404, "Associated store not found")
+    verify_store_access(store, user)
+
     order.status = payload.status
     db.commit()
     db.refresh(order)
 
     # Optional notification hook
     try:
-        store = db.query(Store).filter(Store.id == order.store_id).first()
         if store and store.user_id:
             from app.models.user import User
             from app.services.email_service import send_po_approval_notification
@@ -100,8 +104,9 @@ async def explain_order(
         raise HTTPException(404, f"Purchase order {po_id} not found")
 
     store = db.query(Store).filter(Store.id == order.store_id).first()
-    if store:
-        verify_store_access(store, user)
+    if not store:
+        raise HTTPException(404, "Associated store not found")
+    verify_store_access(store, user)
 
     safety_stock = (
         round(max(0.0, order.forecasted_demand * 0.15), 2)

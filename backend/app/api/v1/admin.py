@@ -122,22 +122,25 @@ async def get_admin_stores(
 ):
     """
     Detailed administrative inventory and ML onboarding matrix across all stores.
+    Optimized with outer joins to avoid N+1 queries.
     """
     from app.models.store import Store
     from app.models.user import User
     from app.models.inventory import Inventory
 
-    stores = db.query(Store).all()
-    results = []
-    for s in stores:
-        owner_email = None
-        if s.user_id:
-            u = db.query(User.email).filter(User.id == s.user_id).first()
-            if u:
-                owner_email = u[0]
-        inv = db.query(Inventory.current_quantity).filter(Inventory.store_id == s.id).first()
-        stock = inv[0] if inv else 0.0
+    rows = (
+        db.query(
+            Store,
+            User.email.label("owner_email"),
+            Inventory.current_quantity.label("current_stock"),
+        )
+        .outerjoin(User, Store.user_id == User.id)
+        .outerjoin(Inventory, Store.id == Inventory.store_id)
+        .all()
+    )
 
+    results = []
+    for s, owner_email, stock in rows:
         results.append({
             "id": s.id,
             "name": s.name,
@@ -149,7 +152,7 @@ async def get_admin_stores(
             "benchmark_store_id": s.benchmark_store_id,
             "forecast_mode": s.forecast_mode,
             "onboarding_status": s.onboarding_status,
-            "current_stock": stock,
+            "current_stock": float(stock) if stock is not None else 0.0,
         })
     return results
 
@@ -185,28 +188,34 @@ async def deep_health_check(
 ):
     """
     Comprehensive diagnostics for DB, Redis, Celery, and external API integrations.
+    Sanitizes internal exception details to prevent security leakage.
     """
+    import logging
     from sqlalchemy import text
     import redis
     from app.core.config import settings
 
+    adm_logger = logging.getLogger(__name__)
     checks = {}
     try:
         db.execute(text("SELECT 1"))
         checks["database"] = "healthy"
     except Exception as e:
-        checks["database"] = f"unhealthy: {str(e)}"
+        adm_logger.error("Deep health check DB failure: %s", e)
+        checks["database"] = "unhealthy"
 
     try:
         r = redis.Redis.from_url(settings.redis_url, socket_timeout=2)
         r.ping()
         checks["redis"] = "healthy"
     except Exception as e:
-        checks["redis"] = f"unhealthy: {str(e)}"
+        adm_logger.error("Deep health check Redis failure: %s", e)
+        checks["redis"] = "unhealthy"
 
     checks["gemini"] = "configured" if settings.gemini_api_key else "missing_key"
     checks["brevo"] = "configured" if settings.brevo_api_key else "missing_key"
 
     return {"status": "ok", "components": checks}
+
 
 

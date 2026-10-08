@@ -54,29 +54,46 @@ def require_role(*allowed_roles: Role):
     return checker
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def rate_limiter(max_requests: int, window_seconds: int):
     """
     Sliding-window rate limiter backed by Redis sorted sets.
-    Mirrors the limiter pattern already used in the URL-shortener project.
+    Fails open gracefully if Redis is unavailable or times out.
     """
 
     async def limiter(request: Request, user: CurrentUser = Depends(get_current_user)):
-        redis = await get_redis()
-        key = f"ratelimit:{user.user_id}:{request.url.path}"
-        now = __import__("time").time()
-        window_start = now - window_seconds
-
-        pipe = redis.pipeline()
-        pipe.zremrangebyscore(key, 0, window_start)
-        pipe.zadd(key, {str(now): now})
-        pipe.zcard(key)
-        pipe.expire(key, window_seconds)
-        _, _, request_count, _ = await pipe.execute()
-
-        if request_count > max_requests:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded. Try again later.",
+        try:
+            redis = await get_redis()
+            identifier = user.user_id if user and hasattr(user, "user_id") else (
+                request.client.host if request.client else "anonymous"
             )
+            key = f"ratelimit:{identifier}:{request.url.path}"
+            now = __import__("time").time()
+            window_start = now - window_seconds
+
+            pipe = redis.pipeline()
+            pipe.zremrangebyscore(key, 0, window_start)
+            pipe.zadd(key, {str(now): now})
+            pipe.zcard(key)
+            pipe.expire(key, window_seconds)
+            results = await pipe.execute()
+            request_count = results[2]
+
+            if request_count > max_requests:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded. Try again later.",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # Production fail-open guarantee: Redis failure must not break customer API traffic
+            logger.warning("Rate limiter failed open due to Redis error: %s", exc)
+            return
 
     return limiter
+

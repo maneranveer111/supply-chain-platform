@@ -92,11 +92,15 @@ async def invalidate_forecast_cache(store_id: int | None = None) -> int:
     )
     try:
         redis = await get_redis()
-        keys = await redis.keys(pattern)
+        if hasattr(redis, "scan_iter"):
+            keys = [k async for k in redis.scan_iter(match=pattern, count=100)]
+        else:
+            keys = await redis.keys(pattern)
         if keys:
             count = await redis.delete(*keys)
             logger.info("Invalidated %d cache keys matching '%s'", count, pattern)
             return count
+
         logger.debug("No keys found to invalidate for pattern '%s'", pattern)
         return 0
     except Exception as exc:
@@ -118,8 +122,8 @@ def invalidate_forecast_cache_sync(store_id: int | None = None) -> int:
         else f"forecast:{CACHE_KEY_VERSION}:*"
     )
     try:
-        r = sync_redis.from_url(settings.redis_url)
-        keys = r.keys(pattern)
+        r = sync_redis.from_url(settings.redis_url, socket_timeout=2.0, socket_connect_timeout=2.0)
+        keys = list(r.scan_iter(match=pattern, count=100))
         if keys:
             count = r.delete(*keys)
             logger.info("Sync invalidated %d cache keys matching '%s'", count, pattern)
